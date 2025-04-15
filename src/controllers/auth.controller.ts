@@ -7,17 +7,20 @@ import {
   sendPasswordResetSuccessEmail,
   sendVerificationEmail,
 } from "../utils";
+import { forgotPasswordSchema, resetPasswordSchema, signInSchema, signUpSchema, verifyEmailSchema } from "../types/types";
 
 export const signUp = async (req: Request, res: Response) => {
   try {
-    const { email, password, name } = req.body;
-    if (!email || !password || !name) {
-      res.status(411).json({
+    const validationResult = signUpSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(411).json({
         success: false,
-        message: "Please provide all required fields",
+        message: "Validation error",
+        errors: validationResult.error.errors
       });
-      return;
     }
+
+    const { email, password, name } = validationResult.data;
 
     const existingUser = await prisma.user.findUnique({
       where: {
@@ -26,15 +29,13 @@ export const signUp = async (req: Request, res: Response) => {
     });
 
     if (existingUser) {
-      res.status(403).json({
+      return res.status(403).json({
         success: false,
         message: "User already exists",
       });
-      return;
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-
     const verifiedToken = Math.floor(
       100000 + Math.random() * 900000
     ).toString();
@@ -59,7 +60,6 @@ export const signUp = async (req: Request, res: Response) => {
     });
 
     generateJwtTokenAndSetCookie(newUser.id, res);
-
     sendVerificationEmail(newUser.email, verifiedToken);
 
     res.status(201).json({
@@ -85,16 +85,18 @@ export const signOut = (req: Request, res: Response) => {
 };
 
 export const signIn = async (req: Request, res: Response) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
-    res.status(400).json({
-      success: false,
-      message: "Please provide all required fields",
-    });
-    return;
-  }
-
   try {
+    const validationResult = signInSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: validationResult.error.errors
+      });
+    }
+
+    const { email, password } = validationResult.data;
+
     const user = await prisma.user.findUnique({
       where: {
         email: email.toLowerCase(),
@@ -102,21 +104,18 @@ export const signIn = async (req: Request, res: Response) => {
     });
 
     if (!user) {
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: "Invalid email or password",
       });
-      return;
     }
 
     const isPasswordCorrect = await bcrypt.compare(password, user.password);
-
     if (!isPasswordCorrect) {
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: "Invalid email or password",
       });
-      return;
     }
 
     generateJwtTokenAndSetCookie(user.id, res);
@@ -152,16 +151,18 @@ export const signIn = async (req: Request, res: Response) => {
 };
 
 export const verifyEmail = async (req: Request, res: Response) => {
-  const { verificationToken } = req.body;
-  if (!verificationToken) {
-    res.status(400).json({
-      success: false,
-      message: "Please provide a verification token",
-    });
-    return;
-  }
-
   try {
+    const validationResult = verifyEmailSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: validationResult.error.errors
+      });
+    }
+
+    const { verificationToken } = validationResult.data;
+
     const user = await prisma.user.findUnique({
       where: {
         verifiedToken: verificationToken,
@@ -172,11 +173,10 @@ export const verifyEmail = async (req: Request, res: Response) => {
     });
 
     if (!user) {
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: "Invalid or expired verification token",
       });
-      return;
     }
 
     const newUser = await prisma.user.update({
@@ -214,16 +214,18 @@ export const verifyEmail = async (req: Request, res: Response) => {
 };
 
 export const forgotPassword = async (req: Request, res: Response) => {
-  const { email } = req.body;
-  if (!email) {
-    res.status(400).json({
-      success: false,
-      message: "Please provide an email",
-    });
-    return;
-  }
-
   try {
+    const validationResult = forgotPasswordSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: validationResult.error.errors
+      });
+    }
+
+    const { email } = validationResult.data;
+
     const user = await prisma.user.findUnique({
       where: {
         email: email.toLowerCase(),
@@ -232,12 +234,12 @@ export const forgotPassword = async (req: Request, res: Response) => {
         id: true,
       },
     });
+    
     if (!user) {
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: "Invalid email",
       });
-      return;
     }
 
     const newToken = crypto.randomUUID();
@@ -262,7 +264,6 @@ export const forgotPassword = async (req: Request, res: Response) => {
     });
 
     const resetURL = `${process.env.Client_URL}/reset-password?token=${newToken}`;
-
     await sendPasswordResetEmail(newUser.email, resetURL);
 
     res.status(200).json({
@@ -280,17 +281,26 @@ export const forgotPassword = async (req: Request, res: Response) => {
 };
 
 export const resetPassword = async (req: Request, res: Response) => {
-  const { token } = req.params;
-  const { password } = req.body;
-  if (!token || !password) {
-    res.status(400).json({
-      success: false,
-      message: "Please provide all required fields",
-    });
-    return;
-  }
-
   try {
+    const { token } = req.params;
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: "Reset token is required",
+      });
+    }
+
+    const validationResult = resetPasswordSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: validationResult.error.errors
+      });
+    }
+
+    const { password } = validationResult.data;
+
     const user = await prisma.user.findUnique({
       where: {
         resetToken: token,
@@ -304,11 +314,10 @@ export const resetPassword = async (req: Request, res: Response) => {
     });
 
     if (!user) {
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: "Invalid or expired reset token",
       });
-      return;
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -350,11 +359,10 @@ export const resetPassword = async (req: Request, res: Response) => {
 export const checkUser = async (req: Request, res: Response) => {
   const userId = req.userId;
   if (!userId) {
-    res.status(401).json({
+    return res.status(401).json({
       success: false,
       message: "You are not authorized to access this resource",
     });
-    return;
   }
 
   try {
